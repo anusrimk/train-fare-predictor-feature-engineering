@@ -1,10 +1,5 @@
-Absolutely. Below is a **GitHub-ready `README.md`** with the complete project story, architecture, Feature Engineering explanation, installation, and **copy-paste commands to run the project**.
 
-You can copy everything inside the code block directly into `README.md`.
-
-````markdown
 # 🚆 RailLens — Railway Ticket Intelligence
-
 > **Turn every railway ticket into travel intelligence.**
 
 RailLens is a machine-learning application that transforms railway ticket images into structured travel data using OCR, applies feature engineering to derive meaningful journey attributes, and uses a trained machine-learning model to estimate ticket prices.
@@ -1197,5 +1192,3 @@ For Windows, the activation command is:
 ```powershell
 .venv\Scripts\activate
 ```
-
-This README also makes an important distinction between **what the current implementation actually does** and the **future railway-network enrichment**, so the GitHub repo doesn't claim features that aren't implemented yet.
