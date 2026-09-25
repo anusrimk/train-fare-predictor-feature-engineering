@@ -1,86 +1,398 @@
-import os, re, json, sys
+import os
+import sys
+
+import joblib
 import pandas as pd
 import streamlit as st
 from PIL import Image
-import joblib
 
-ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.join(ROOT,"src"))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+sys.path.append(os.path.join(ROOT, "src"))
+
 from feature_engineering import add_features
+from ocr import ocr_text, parse_ticket_text
 
-MODEL_PATH=os.path.join(ROOT,"models","price_model.joblib")
 
-st.set_page_config(page_title="RailLens",page_icon="🚆",layout="wide")
+MODEL_PATH = os.path.join(ROOT, "models", "price_model.joblib")
+
+
+st.set_page_config(
+    page_title="RailLens",
+    page_icon="🚆",
+    layout="wide"
+)
+
 st.title("🚆 RailLens")
-st.caption("Train Ticket Feature Engineering + ML — upload or capture a ticket")
+st.caption(
+    "Turn a railway ticket into structured travel intelligence"
+)
+
+
+# ---------------------------------------------------------
+# LOAD MODEL
+# ---------------------------------------------------------
 
 if not os.path.exists(MODEL_PATH):
-    st.warning("Model not found. Run `python src/train.py` first.")
+    st.error(
+        "Model not found. Please run `python src/train.py` first."
+    )
     st.stop()
 
-model=joblib.load(MODEL_PATH)
+model = joblib.load(MODEL_PATH)
 
-st.sidebar.header("Input")
-mode=st.sidebar.radio("Ticket image source",["Upload from gallery","Take a photo"])
-if mode=="Upload from gallery":
-    file=st.file_uploader("Upload a ticket image",type=["png","jpg","jpeg"])
+
+# ---------------------------------------------------------
+# SESSION STATE
+# ---------------------------------------------------------
+
+defaults = {
+    "origin": "",
+    "destination": "",
+    "train_type": "",
+    "train_class": "",
+    "start_date": "",
+    "end_date": "",
+    "insert_date": "",
+    "fare": "",
+    "price": "",
+    "ocr_done": False,
+    "ocr_raw": "",
+}
+
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
+# ---------------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------------
+
+st.sidebar.header("🎫 Ticket Input")
+
+mode = st.sidebar.radio(
+    "Choose ticket source",
+    [
+        "Upload from gallery",
+        "Take a photo"
+    ]
+)
+
+
+# ---------------------------------------------------------
+# IMAGE INPUT
+# ---------------------------------------------------------
+
+if mode == "Upload from gallery":
+
+    file = st.file_uploader(
+        "Upload your railway ticket",
+        type=["png", "jpg", "jpeg"]
+    )
+
 else:
-    file=st.camera_input("Take a photo of the ticket")
 
-image=None
-if file:
-    image=Image.open(file)
-    st.image(image,caption="Ticket input",width=700)
+    file = st.camera_input(
+        "Take a photo of your railway ticket"
+    )
+
+
+# ---------------------------------------------------------
+# OCR
+# ---------------------------------------------------------
+
+if file is not None:
+
+    image = Image.open(file)
+
+    st.image(
+        image,
+        caption="Ticket uploaded",
+        width=700
+    )
+
+    # Run OCR only once for this uploaded image
+    if not st.session_state.ocr_done:
+
+        with st.spinner("🔎 Reading ticket..."):
+
+            raw_text = ocr_text(image)
+
+            st.session_state.ocr_raw = raw_text
+
+            parsed = parse_ticket_text(raw_text)
+
+            for key, value in parsed.items():
+
+                if value:
+                    st.session_state[key] = value
+
+            st.session_state.ocr_done = True
+
+        st.success("✅ Ticket information extracted!")
+
+    else:
+        st.success("✅ Ticket information loaded!")
+
+
+# ---------------------------------------------------------
+# OCR DEBUG
+# ---------------------------------------------------------
+
+if st.session_state.ocr_raw:
+
+    with st.expander("🔍 View raw OCR text"):
+
+        st.text(
+            st.session_state.ocr_raw
+        )
+
+
+# ---------------------------------------------------------
+# TICKET DETAILS
+# ---------------------------------------------------------
 
 st.divider()
-st.subheader("Ticket details")
-st.info("OCR is intentionally editable: real tickets can have different layouts. You can test the ML pipeline even when OCR cannot confidently read a field.")
 
-def val(label, default=""):
-    return st.text_input(label,default)
+st.subheader("🎫 Extracted Ticket Details")
 
-c1,c2,c3=st.columns(3)
-with c1:
-    origin=val("Origin","MADRID")
-    destination=val("Destination","BARCELONA")
-    train_type=val("Train type","AVE")
-with c2:
-    start_date=val("Departure","2026-10-12 08:30:00")
-    end_date=val("Arrival","2026-10-12 11:15:00")
-    train_class=val("Class","Turista")
-with c3:
-    insert_date=val("Booking/listing time","2026-10-01 10:00:00")
-    fare=val("Fare","Flexible")
+st.caption(
+    "OCR automatically fills these fields. "
+    "You can edit them if the ticket was read incorrectly."
+)
 
-st.caption("The target price is NOT entered — it is what the ML model predicts.")
-if st.button("🔮 Predict ticket price",type="primary"):
-    raw=pd.DataFrame([{
-        "Unnamed: 0":0,
-        "insert_date":insert_date,
-        "origin":origin,
-        "destination":destination,
-        "start_date":start_date,
-        "end_date":end_date,
-        "train_type":train_type,
-        "train_class":train_class,
-        "fare":fare,
-        "price":0
+
+col1, col2, col3 = st.columns(3)
+
+
+with col1:
+
+    st.text_input(
+        "Origin",
+        key="origin",
+        placeholder="e.g. MADRID"
+    )
+
+    st.text_input(
+        "Destination",
+        key="destination",
+        placeholder="e.g. BARCELONA"
+    )
+
+    st.text_input(
+        "Train Type",
+        key="train_type",
+        placeholder="e.g. AVE"
+    )
+
+
+with col2:
+
+    st.text_input(
+        "Departure",
+        key="start_date",
+        placeholder="YYYY-MM-DD HH:MM:SS"
+    )
+
+    st.text_input(
+        "Arrival",
+        key="end_date",
+        placeholder="YYYY-MM-DD HH:MM:SS"
+    )
+
+    st.text_input(
+        "Class",
+        key="train_class",
+        placeholder="e.g. Turista"
+    )
+
+
+with col3:
+
+    st.text_input(
+        "Booking / Listing Time",
+        key="insert_date",
+        placeholder="YYYY-MM-DD HH:MM:SS"
+    )
+
+    st.text_input(
+        "Fare Type",
+        key="fare",
+        placeholder="e.g. Flexible"
+    )
+
+    st.text_input(
+        "Actual Ticket Price",
+        key="price",
+        placeholder="Optional"
+    )
+
+
+# ---------------------------------------------------------
+# FEATURE ENGINEERING
+# ---------------------------------------------------------
+
+st.divider()
+
+st.subheader("⚙️ Feature Engineering")
+
+if st.button(
+    "⚙️ Generate Features",
+    type="secondary"
+):
+
+    raw = pd.DataFrame([{
+
+        "Unnamed: 0": 0,
+
+        "insert_date":
+            st.session_state.insert_date,
+
+        "origin":
+            st.session_state.origin,
+
+        "destination":
+            st.session_state.destination,
+
+        "start_date":
+            st.session_state.start_date,
+
+        "end_date":
+            st.session_state.end_date,
+
+        "train_type":
+            st.session_state.train_type,
+
+        "train_class":
+            st.session_state.train_class,
+
+        "fare":
+            st.session_state.fare,
+
+        "price": 0
+
     }])
-    X=add_features(raw)
-    pred=float(model.predict(X)[0])
-    st.success(f"Predicted ticket price: **€{pred:,.2f}**")
-    feat= X.iloc[0].to_dict()
-    st.subheader("Engineered features")
-    show_cols=["departure_hour","arrival_hour","departure_weekday","departure_month",
-               "is_weekend","departure_period","season","journey_duration_hours",
-               "advance_booking_hours","is_overnight","same_day_journey",
-               "route_frequency","origin_frequency","destination_frequency"]
-    st.dataframe(pd.DataFrame({"Feature":show_cols,"Value":[feat.get(c) for c in show_cols]}),hide_index=True)
+
+    features = add_features(raw)
+
+    st.session_state.engineered_features = features
+
+
+if "engineered_features" in st.session_state:
+
+    features = st.session_state.engineered_features
+
+    st.success(
+        f"Generated {features.shape[1]} engineered features."
+    )
+
+    st.dataframe(
+        features.T.rename(
+            columns={0: "Value"}
+        ),
+        use_container_width=True
+    )
+
+
+# ---------------------------------------------------------
+# PREDICTION
+# ---------------------------------------------------------
 
 st.divider()
-st.subheader("How this demonstrates Feature Engineering")
-st.markdown("""
-**Raw ticket → parsing → cleaning → temporal features → duration/advance-booking features → categorical encoding → scaling → ML prediction**
 
-The app keeps the feature engineering function shared with training so the model sees a consistent feature schema.
+st.subheader("🤖 Machine Learning Prediction")
+
+if st.button(
+    "🔮 Predict Ticket Price",
+    type="primary"
+):
+
+    raw = pd.DataFrame([{
+
+        "Unnamed: 0": 0,
+
+        "insert_date":
+            st.session_state.insert_date,
+
+        "origin":
+            st.session_state.origin,
+
+        "destination":
+            st.session_state.destination,
+
+        "start_date":
+            st.session_state.start_date,
+
+        "end_date":
+            st.session_state.end_date,
+
+        "train_type":
+            st.session_state.train_type,
+
+        "train_class":
+            st.session_state.train_class,
+
+        "fare":
+            st.session_state.fare,
+
+        "price": 0
+
+    }])
+
+    try:
+
+        X = add_features(raw)
+
+        prediction = float(
+            model.predict(X)[0]
+        )
+
+        st.success(
+            f"### Predicted Ticket Price: €{prediction:,.2f}"
+        )
+
+        st.info(
+            "Prediction generated using the trained "
+            "Feature Engineering + Random Forest pipeline."
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Prediction failed: {e}"
+        )
+
+
+# ---------------------------------------------------------
+# PIPELINE
+# ---------------------------------------------------------
+
+st.divider()
+
+st.subheader("🧠 How RailLens Works")
+
+st.markdown("""
+```text
+Ticket Image
+     ↓
+OCR
+     ↓
+Structured Ticket Data
+     ↓
+Data Cleaning
+     ↓
+Feature Engineering
+     ↓
+Temporal Features
+     ↓
+Route Features
+     ↓
+Categorical Encoding
+     ↓
+Feature Scaling
+     ↓
+Random Forest
+     ↓
+Fare Prediction 
 """)
